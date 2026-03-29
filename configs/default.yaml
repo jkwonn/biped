@@ -1,0 +1,131 @@
+# ── Physical robot dimensions ──────────────────────────────────────
+# All lengths in METERS, masses in KG, angles in RADIANS
+robot:
+  upper_leg: 0.08          # hip joint to knee joint
+  lower_leg: 0.08          # knee joint to ankle joint
+  hip_offset_y: 0.04       # lateral distance from body center to hip joint
+  foot_height: 0.015       # ankle joint to bottom of foot
+
+  torso_mass: 0.4          # used for balance/CoM calculations
+  leg_mass: 0.1            # per leg
+
+  # Joint limits (radians) — set to match your mechanical range
+  hip_roll_min: -0.5       # negative = leg inward toward body
+  hip_roll_max: 0.5        # positive = leg outward away from body
+  hip_pitch_min: -1.2      # negative = leg forward
+  hip_pitch_max: 1.2       # positive = leg backward
+  knee_pitch_min: 0.0      # knee only bends one way
+  knee_pitch_max: 2.2
+  ankle_pitch_min: -1.0
+  ankle_pitch_max: 1.0
+
+  servo_speed: 5.8         # rad/s — DS3240 ~0.18s/60deg unloaded at 6V
+  servo_update_hz: 50      # how often to send servo commands
+
+# ── Gait parameters ───────────────────────────────────────────────
+# Lengths in METERS, times in SECONDS, ratios are unitless
+gait:
+  stand_height: 0.13       # ground to hip when standing (must be <= upper+lower+foot)
+  stand_foot_spread: 0.04  # lateral distance from center to each foot
+  step_height: 0.025       # how high the foot lifts during swing phase
+  step_length: 0.04        # forward distance covered per step
+  step_period: 1.2         # time for one full L+R gait cycle
+  duty_factor: 0.65        # fraction of cycle each foot is on the ground (0.5-0.85)
+  lateral_sway: 0.02       # how far the body shifts over the stance leg
+  forward_lean: 0.02       # forward torso tilt scaled by speed
+  sway_advance: 0.1        # phase lead for sway timing (0-1, fraction of cycle)
+  turn_rate: 0.0
+
+# ── Servo calibration ─────────────────────────────────────────────
+# Each channel maps to one servo on the PCA9685 PWM driver.
+#
+#   center_us : pulse width (microseconds) when joint is at 0 rad.
+#               Default 1500. Find experimentally for each servo —
+#               this is the most important calibration value.
+#
+#   dir       : rotation direction multiplier, +1 or -1.
+#               If positive IK angle moves the joint the wrong way, flip to -1.
+#               Left/right legs are mirrored so they'll usually have opposite dirs.
+#
+#   label     : human-readable name, must match ServoMapper joint mapping.
+#
+# Joint chain per leg (4 DOF):
+#   hip_roll    — internal hip joint, rotates around X axis (forward),
+#                 swings leg laterally in/out relative to torso
+#   hip_pitch   — external hip joint, rotates around Y axis (lateral),
+#                 swings leg forward/backward
+#   knee_pitch  — rotates around Y axis (lateral), bends knee
+#   ankle_pitch — rotates around Y axis (lateral), tilts foot up/down
+#
+servo_calibration:
+  # ── Left leg (channels 0-3) ──
+  0:
+    center_us: 1500
+    dir: 1
+    label: left_hip_roll
+  1:
+    center_us: 1500
+    dir: 1
+    label: left_hip_pitch
+  2:
+    center_us: 1500
+    dir: 1
+    label: left_knee_pitch
+  3:
+    center_us: 1500
+    dir: 1
+    label: left_ankle_pitch
+
+  # ── Right leg (channels 4-7) ──
+  4:
+    center_us: 1500
+    dir: 1
+    label: right_hip_roll
+  5:
+    center_us: 1500
+    dir: 1
+    label: right_hip_pitch
+  6:
+    center_us: 1500
+    dir: 1
+    label: right_knee_pitch
+  7:
+    center_us: 1500
+    dir: 1
+    label: right_ankle_pitch
+
+  # ── Head/neck (channels 8-11) ──
+  8:
+    center_us: 1500
+    dir: 1
+    label: head_pan
+  9:
+    center_us: 1500
+    dir: 1
+    label: head_tilt
+  10:
+    center_us: 1500
+    dir: 1
+    label: neck_pan
+  11:
+    center_us: 1500
+    dir: 1
+    label: neck_tilt
+
+# ── Vision tracking ───────────────────────────────────────────────
+vision:
+  model_size: yolov8n
+  input_size: 320
+  confidence_threshold: 0.5
+  person_class_id: 0
+  max_disappeared: 15
+  max_distance: 100
+  lock_on_largest: true
+  deadband_x: 0.08
+  deadband_size: 0.05
+  target_bbox_height: 0.45
+  kp_yaw: 1.5
+  kp_forward: 1.0
+  smoothing_alpha: 0.3
+  max_yaw_cmd: 1.0
+  max_forward_cmd: 1.0

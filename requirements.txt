@@ -1,0 +1,6 @@
+numpy>=1.24
+matplotlib>=3.7
+opencv-python>=4.8
+ultralytics>=8.0
+pyyaml>=6.0
+pyserial>=3.5
