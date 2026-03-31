@@ -1,99 +1,108 @@
-# Bipedal Desk Robot — CLI Toolkit
+# biped cli
 
-Software toolkit for a bipedal desk robot with DS3240 servos, BNO055/MPU6050 IMU,
-ESP32-CAM vision, and Daisy Seed controller.
+software toolkit for a bipedal desk robot. handles gait generation, inverse kinematics,
+servo control, vision tracking, and parameter tuning.
 
-## Setup
+## getting started
 
 ```bash
 cd biped-cli
 python -m venv venv
-source venv/bin/activate  # macOS/Linux
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Commands
+## commands
 
 ```bash
-# Show all available commands
+# see everything available
 python -m biped --help
 
-# Gait visualization (animated stick figure)
+# send commands to the robot over usb serial
+python -m biped run --port /dev/cu.usbmodem* --mode stand
+python -m biped run --port /dev/cu.usbmodem* --mode walk
+python -m biped run --port /dev/cu.usbmodem* --mode walk --yaw 0.3
+python -m biped run --port /dev/cu.usbmodem* --mode sweep --channel 0
+python -m biped run --port /dev/cu.usbmodem* --mode center
+
+# visualize the gait in a matplotlib window
 python -m biped gait --walk
 python -m biped gait --stand
 
-# Tune parameters interactively with live visualization
+# tune gait parameters with sliders and live animation
 python -m biped tune
 
-# Run vision tracking pipeline (webcam)
+# run person detection and tracking
 python -m biped vision
 python -m biped vision --source path/to/video.mp4
-python -m biped vision --source http://192.168.1.100:81/stream
 
-# Export YOLO model to ONNX for ZimaBoard deployment
-python -m biped vision --export-onnx
-
-# Calibrate servos interactively
+# show current servo calibration values
 python -m biped calibrate
 
-# Run mock UDP receiver (test command pipeline)
-python -m biped mock-receiver --port 8888
-
-# Export current parameters to YAML
+# save your current config
 python -m biped export --output my_robot.yaml
-
-# Load custom parameters
-python -m biped gait --walk --config configs/my_robot.yaml
 ```
 
-## Project Structure
+## project layout
 
 ```
 biped-cli/
 ├── biped/
-│   ├── __init__.py
-│   ├── __main__.py          # CLI entry point
-│   ├── kinematics.py        # IK/FK solver (4-DOF: hip_roll → hip_pitch → knee → ankle)
-│   ├── gait.py              # Parametric gait generator
-│   ├── balance.py           # IMU-based balance controller
-│   ├── servo.py             # Servo mapping and calibration
-│   ├── vision.py            # Person detection and tracking
-│   ├── comms.py             # UDP command sender/receiver
-│   ├── tuner.py             # Interactive parameter tuning GUI
-│   └── config.py            # Parameter management (YAML/JSON)
+│   ├── __main__.py          cli entry point
+│   ├── kinematics.py        inverse and forward kinematics (4 dof per leg)
+│   ├── gait.py              walking gait generator with differential steering
+│   ├── balance.py           pid balance controller using imu feedback
+│   ├── servo.py             angle to pwm mapping for ds3240 servos
+│   ├── tuner.py             interactive gui for tuning gait parameters
+│   ├── vision.py            person detection and tracking with yolo
+│   ├── comms.py             serial link to daisy seed + udp for vision
+│   └── config.py            loads and merges yaml/json configs
+├── firmware/
+│   ├── src/main.cpp         daisy seed firmware (serial > pca9685 > servos)
+│   ├── src/pca9685.cpp      i2c pwm driver
+│   └── Makefile
 ├── configs/
-│   └── default.yaml         # Default robot/gait parameters (commented)
+│   └── default.yaml         all robot and gait parameters (commented)
+├── tests/                   ik, gait, and balance tests
 ├── scripts/
-│   └── servo_test.py        # Standalone servo sweep test
-├── requirements.txt
+│   └── servo_test.py        standalone servo sweep utility
+├── SETUP.md                 full hardware setup and calibration guide
 └── README.md
 ```
 
-## Hardware
+## hardware
 
-- 12x DS3240 servos (8 leg + 4 head/neck) at 6V via high-current buck
-- PCA9685 16-channel PWM driver over I2C
-- BNO055 or MPU6050 IMU over I2C
-- ESP32-CAM with OV5640 for MJPEG streaming
-- Daisy Seed (STM32H7) as locomotion controller
-- 3S LiPo with separate servo/logic power rails
+- 8x ds3240 servos for legs (4 per leg) at 6v
+- 4x ds3240 servos for head/neck (optional)
+- pca9685 pwm driver board over i2c
+- daisy seed (stm32h7) as the servo controller
+- bno055 or mpu6050 imu for balance (optional, not needed for initial walking)
+- 3s lipo with separate servo and logic power
 
-## Leg Joint Layout (4 DOF per leg)
+## how the legs work
 
-Each leg has four joints in series:
+each leg has 4 joints chained together:
 
-1. **Hip roll** — internal hip joint, rotates around X axis (forward axis), swings leg in/out laterally
-2. **Hip pitch** — external hip joint, rotates around Y axis (lateral axis), swings leg forward/backward
-3. **Knee pitch** — rotates around Y axis (lateral axis), bends knee
-4. **Ankle pitch** — rotates around Y axis (lateral axis), tilts foot to keep sole flat
+1. **hip roll** — the internal hip joint, swings the leg in and out laterally (x axis)
+2. **hip pitch** — the external hip joint, swings the leg forward and backward (y axis)
+3. **knee pitch** — bends the knee (y axis)
+4. **ankle pitch** — tilts the foot to keep the sole flat on the ground (y axis)
 
-## Configuration
+the inverse kinematics solver in `kinematics.py` figures out the angles for all four
+joints given a target foot position. the gait generator in `gait.py` produces those
+foot positions over time to make the robot walk.
 
-All parameters live in `configs/default.yaml` with inline comments explaining
-units and purpose. Edit this file to match your robot's measurements and
-servo calibration.
+turning works by giving each leg a different step length. the leg on the inside of the
+turn takes smaller steps while the outside leg takes bigger ones.
 
-Key things to calibrate:
-- Leg segment lengths (`upper_leg`, `lower_leg`, `foot_height`)
-- Servo center pulse widths (`center_us`) — found experimentally per servo
-- Servo directions (`dir`) — flip to `-1` if a joint moves the wrong way
+## config
+
+everything lives in `configs/default.yaml` with comments explaining what each value
+does. all lengths are in meters, angles in radians, times in seconds.
+
+the most important things to get right:
+- your actual leg measurements (`upper_leg`, `lower_leg`, `foot_height`)
+- servo center pulse widths (`center_us`) — found by testing each servo
+- servo directions (`dir`) — flip to -1 if a joint moves the wrong way
+
+see `SETUP.md` for the full calibration walkthrough.

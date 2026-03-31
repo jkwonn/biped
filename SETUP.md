@@ -1,25 +1,24 @@
-# Hardware Setup & Verification Guide
+# setup guide
 
-Step-by-step instructions from fresh hardware to walking robot.
+how to go from a pile of parts to a walking robot.
 
-## Prerequisites
+## what you need
 
-**Hardware:**
-- Daisy Seed (STM32H7) microcontroller
-- PCA9685 16-channel PWM driver board
-- 8x DS3240 servo motors (4 per leg)
-- 4x DS3240 servos for head/neck (optional)
-- BNO055 or MPU6050 IMU (optional, for balance — not needed for initial walking)
-- 6V high-current power supply or BEC for servos (DS3240 draws up to 3A stall per servo)
-- 3.3V logic power for Daisy Seed (USB or separate regulator)
-- USB cable for Daisy Seed to computer
+**hardware**
+- daisy seed microcontroller
+- pca9685 pwm driver board
+- 8x ds3240 servos for legs (4 per leg)
+- 4x ds3240 servos for head/neck if you want those
+- 6v power supply that can handle the current (ds3240s pull up to 3a each at stall)
+- usb cable to connect the daisy seed to your computer
+- optionally a bno055 or mpu6050 imu for balance later
 
-**Software:**
-- Python 3.10+ with venv
-- ARM GCC toolchain (for Daisy Seed firmware)
-- libDaisy (Electro-Smith Daisy library)
+**software**
+- python 3.10+
+- arm gcc toolchain for building the daisy firmware
+- libdaisy (gets cloned during the firmware build)
 
-## Phase 0: Software Setup
+## step 1: install the python side
 
 ```bash
 cd biped-cli
@@ -27,198 +26,187 @@ python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-# Verify everything works
+# make sure everything works
 python -m pytest tests/ -v
 python -m biped gait --stand
 ```
 
-## Phase 1: Wiring
+## step 2: wire it up
 
 ```
-                        6V servo power
+                        6v servo power
                              │
-  Computer ──USB── Daisy Seed ──I2C── PCA9685 ──PWM── DS3240 servos
-                     (3.3V)          (addr 0x40)       (x12 channels)
+  computer ──usb── daisy seed ──i2c── pca9685 ──pwm── servos (x12)
+                     (3.3v)          (addr 0x40)
                        │
-                       └──I2C── IMU (optional, same bus or I2C2)
-
-  I2C connections (PCA9685 and optional IMU):
-    Daisy D11 (PB8) ── SCL ── 4.7kΩ pullup to 3.3V
-    Daisy D12 (PB9) ── SDA ── 4.7kΩ pullup to 3.3V
-    GND ── GND (shared between Daisy, PCA9685, and servos)
+                       └──i2c── imu (optional, same bus or i2c2)
 ```
 
-**PCA9685 channel assignment** (must match `configs/default.yaml`):
+for the i2c connections:
+- daisy pin d11 (pb8) is scl, needs a 4.7k pullup to 3.3v
+- daisy pin d12 (pb9) is sda, needs a 4.7k pullup to 3.3v
+- all boards share a common ground
+
+the pca9685 channel assignments need to match `configs/default.yaml`:
 
 ```
-  CH 0  ── left_hip_roll      CH 4  ── right_hip_roll
-  CH 1  ── left_hip_pitch     CH 5  ── right_hip_pitch
-  CH 2  ── left_knee_pitch    CH 6  ── right_knee_pitch
-  CH 3  ── left_ankle_pitch   CH 7  ── right_ankle_pitch
-  CH 8  ── head_pan           CH 10 ── neck_pan
-  CH 9  ── head_tilt          CH 11 ── neck_tilt
+  ch 0  left_hip_roll        ch 4  right_hip_roll
+  ch 1  left_hip_pitch       ch 5  right_hip_pitch
+  ch 2  left_knee_pitch      ch 6  right_knee_pitch
+  ch 3  left_ankle_pitch     ch 7  right_ankle_pitch
+  ch 8  head_pan             ch 10 neck_pan
+  ch 9  head_tilt            ch 11 neck_tilt
 ```
 
-**Power warning:** DO NOT power the DS3240 servos from the Daisy Seed's 3.3V rail.
-They need 6V at high current. Use a separate BEC or bench supply connected to the
-PCA9685's V+ terminal. Share GND between all boards.
+**important:** don't try to power the servos from the daisy's 3.3v rail. they need
+6v at high current. use a separate supply connected to the pca9685's v+ screw terminal.
 
-## Phase 2: Flash Firmware
+## step 3: flash the firmware
 
 ```bash
 cd firmware
 
-# First time: clone libDaisy and build it
+# first time only: grab libdaisy and build it
 git clone https://github.com/electro-smith/libDaisy.git
 cd libDaisy && make -j && cd ..
 
-# Build and flash firmware
+# build and flash
 make
 make program-dfu
 ```
 
-After flashing, the Daisy Seed will appear as a USB serial device. Verify:
+after flashing, the daisy should show up as a usb serial device:
 ```bash
-# macOS
-ls /dev/cu.usbmodem*
-
-# Linux
-ls /dev/ttyACM*
+ls /dev/cu.usbmodem*     # macos
+ls /dev/ttyACM*           # linux
 ```
 
-## Phase 3: Servo Calibration
+## step 4: calibrate the servos
 
-This is the most important step. Bad calibration = broken robot.
+this is the most tedious part but also the most important. if calibration is off,
+nothing else will work right.
 
-### 3a. Find center pulse widths
+### find the center positions
 
-With the robot frame assembled but servo horns NOT attached:
+assemble the robot frame but don't attach the servo horns yet. then center all servos:
 
 ```bash
-# Center all servos at 1500us (default)
-python -m biped run --mode stand --port /dev/cu.usbmodem*
+python -m biped run --mode center --port /dev/cu.usbmodem*
 ```
 
-For each servo:
-1. The servo moves to 1500us (nominal center)
-2. Attach the servo horn so the joint is at its zero/neutral position:
-   - Hip roll: leg hanging straight down
-   - Hip pitch: upper leg pointing straight down
-   - Knee: leg fully straight (upper and lower leg aligned)
-   - Ankle: foot sole perpendicular to lower leg
-3. If the horn spline doesn't allow perfect alignment, note the offset
+now for each servo:
+1. the servo moves to 1500us (its default center)
+2. attach the horn so the joint is at its natural zero position:
+   - hip roll: leg hanging straight down
+   - hip pitch: upper leg pointing straight down
+   - knee: fully straight
+   - ankle: foot perpendicular to the lower leg
+3. if the horn spline doesn't let you get a perfect zero, tweak `center_us` in
+   the config until it does
 
-If you can't get a perfect zero with the horn, adjust `center_us` in the config:
+you can test individual channels with:
 ```bash
-# Test a specific channel interactively
 python -m biped run --mode sweep --port /dev/cu.usbmodem* --channel 0
 ```
 
-Write each `center_us` value into `configs/default.yaml`.
+### find the servo directions
 
-### 3b. Find servo directions
+for each servo, send a small positive angle and see which way it moves:
+- hip_roll positive should move the leg outward, away from the body
+- hip_pitch positive should move the leg backward
+- knee_pitch positive should bend the knee
+- ankle_pitch positive should tilt the toes up
 
-For each servo:
-1. Command a small positive angle (+0.3 rad ≈ +17 deg)
-2. Watch which direction the joint moves
-3. Expected directions:
-   - `hip_roll` positive → leg moves outward (away from body)
-   - `hip_pitch` positive → leg moves backward
-   - `knee_pitch` positive → knee bends (lower leg moves backward)
-   - `ankle_pitch` positive → foot tilts toes up
-4. If the joint moves opposite to expected: set `dir: -1`
+if a joint moves the opposite way, set `dir: -1` for that channel in the config.
+left and right legs are mirrored so they'll usually have opposite dir values.
 
-Left and right legs are mirrored, so corresponding joints will typically have
-opposite `dir` values.
-
-### 3c. Verify stand pose
+### check the stand pose
 
 ```bash
 python -m biped run --mode stand --port /dev/cu.usbmodem*
 ```
 
-The robot should stand with both legs straight-ish under the body. Compare the
-physical pose to the simulation:
+the robot should stand with both legs roughly straight under the body. compare it
+to what the simulator shows:
 
 ```bash
 python -m biped gait --stand
 ```
 
-If any joint looks wrong, recheck `center_us` and `dir` for that channel.
+if something looks off, go back and check `center_us` and `dir` for that joint.
 
-## Phase 4: First Steps
+## step 5: get it walking
 
-Start SLOW. Increase speed only after stable walking is confirmed.
+start slow. you can always speed up later.
 
-### 4a. Tune standing stability
+### tune the standing height
 
-In `configs/default.yaml`, adjust:
-- `stand_height`: lower = more bent knees = more stable but weaker servos.
-  Start around 70-80% of max leg reach.
-- Hold the robot by hand and verify it can support its own weight.
+in `configs/default.yaml`, set `stand_height` to about 70-80% of your total leg
+reach (upper_leg + lower_leg). hold the robot by hand and make sure it can support
+its own weight without the servos straining.
 
-### 4b. Tune walking gait
+### tune the gait
 
+open the tuner:
 ```bash
 python -m biped tune
 ```
 
-In the tuner GUI:
-1. Set `step_period` HIGH (2.0-3.0s) — start very slow
-2. Set `step_length` LOW (1.0-2.0cm) — small steps
-3. Set `lateral_sway` to roughly the hip offset (2-4cm) — needs to shift weight
-4. Click "Walk" and watch the simulation
-5. When the sim looks reasonable, try on hardware:
+start with conservative settings:
+- step_period high (2-3 seconds per cycle)
+- step_length small (1-2cm)
+- lateral_sway around 2-4cm (needs to shift weight over the stance leg)
+
+click walk and watch the simulation. when it looks reasonable, try it on hardware:
 
 ```bash
 python -m biped run --mode walk --port /dev/cu.usbmodem*
 ```
 
-**Hold the robot by hand for the first tests.** Only let go when it's clearly
-shifting weight and not tipping.
+**hold the robot the first few times.** only let go once you can see it shifting
+weight properly and not tipping over.
 
-### 4c. Iterate
+### speed it up gradually
 
-Gradually:
-- Decrease `step_period` (faster walking)
-- Increase `step_length` (bigger steps)
-- Fine-tune `lateral_sway` and `sway_advance` (weight shift timing)
-- Adjust `duty_factor` (time spent on ground vs in air)
+once slow walking works:
+- lower step_period for faster steps
+- increase step_length for bigger steps
+- fine tune lateral_sway and sway_advance for smoother weight shifting
+- adjust duty_factor if the foot is spending too much or too little time in the air
 
-### 4d. Test turning
+### try turning
 
 ```bash
 python -m biped run --mode walk --port /dev/cu.usbmodem* --yaw 0.3
 ```
 
-Positive yaw = turn left, negative = turn right. Start with small values (0.1-0.3).
+positive yaw turns left, negative turns right. start with small values like 0.1-0.3.
 
-## Phase 5: Balance (Optional, after walking works)
+## step 6: add balance (after walking works)
 
-Once open-loop walking is stable, add IMU feedback:
-1. Wire BNO055 or MPU6050 to the same I2C bus (or I2C2)
-2. Enable IMU in firmware config
-3. The firmware sends pitch/roll data back over serial
-4. `balance.py` computes corrective offsets added to gait angles
+once the robot can walk without falling over in open loop, you can add imu feedback:
 
-This is not needed for initial walking — do it after open-loop gait works.
+1. wire a bno055 or mpu6050 to the i2c bus
+2. enable imu reading in the firmware
+3. the firmware sends pitch/roll back over serial
+4. the balance controller in `balance.py` computes corrections that get added to the gait angles
 
-## Troubleshooting
+you don't need this for initial walking. get the gait working first.
 
-| Symptom | Likely cause |
+## troubleshooting
+
+| what's happening | probably why |
 |---|---|
-| Servo jitters at rest | Insufficient power supply current, or servo fighting against mechanical stop |
-| Robot leans to one side | `center_us` wrong on hip_roll, or `lateral_sway` / `sway_advance` needs tuning |
-| Foot drags during swing | `step_height` too low, or `step_period` too fast for servo speed |
-| Robot falls forward/backward | `forward_lean` too high, or `stand_height` wrong |
-| Serial connection drops | USB power issue — use powered hub, or check cable |
-| "IK unreachable" warning | `stand_height` is set higher than the legs can reach |
+| servo jitters when standing still | not enough current from the power supply, or servo is fighting a mechanical stop |
+| robot leans to one side | center_us is off on a hip_roll servo, or lateral_sway needs tuning |
+| foot drags during swing phase | step_height is too low, or the step_period is faster than the servos can move |
+| robot tips forward or backward | forward_lean is too high, or stand_height needs adjusting |
+| serial connection drops | usb power issue, try a powered hub or different cable |
+| "ik unreachable" warning | stand_height is set higher than the legs can physically reach |
 
-## Config Quick Reference
+## quick reference
 
-All lengths in **meters**, angles in **radians**, times in **seconds**.
+all lengths are in meters, angles in radians, times in seconds.
 
-```
-upper_leg + lower_leg + foot_height  >  stand_height  (or IK fails)
-step_period × servo_speed  >  step arc  (or servos can't keep up)
-```
+your stand_height needs to be less than upper_leg + lower_leg + foot_height,
+otherwise the ik solver can't reach the ground.
